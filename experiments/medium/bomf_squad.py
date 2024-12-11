@@ -19,6 +19,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 # -----------------------------------------------------------------------------
+from src import utils, squad_utils, glue_utils
+
 import time
 import datetime
 import argparse
@@ -31,7 +33,6 @@ import re
 import string  
 import datasets 
 
-# Model
 import json
 from collections import Counter
 from transformers import T5Tokenizer, T5ForConditionalGeneration
@@ -63,41 +64,6 @@ from tqdm import tqdm
 from collections import OrderedDict
 from torch.utils.data import Dataset
 
-def remove_trash(state_dict):
-    new_state_dict = OrderedDict()
-    for k, v in state_dict.items():
-        if k == 'n_averaged':
-            continue
-        if 'module' in k:
-            name = k[7:]
-            new_state_dict[name] = v
-        else:
-            name = k
-            new_state_dict[name] = v
-    return new_state_dict
-
-def set_seed(seed):
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-
-def seed_worker(seed):
-    worker_seed = torch.initial_seed() % 2**32
-    random.seed(worker_seed)
-    np.random.seed(worker_seed)
-    torch.manual_seed(worker_seed)
-    torch.cuda.manual_seed(worker_seed)
-    torch.cuda.manual_seed_all(worker_seed)
-
-def configure_cudnn(debug):
-    cudnn.enabled = True
-    cudnn.benchmark = True
-    if debug:
-        cudnn.deterministic = True
-        cudnn.benchmark = False
 
 def generate_summary(model, tokenizer, source, target):
   
@@ -113,8 +79,8 @@ def generate_summary(model, tokenizer, source, target):
 
 device ="cuda" if torch.cuda.is_available() else "cpu"
 
+
 def normalize_answer(s):
-    """Lower text and remove punctuation, articles and extra whitespace."""
     def remove_articles(text):
         return re.sub(r'\b(a|an|the)\b', ' ', text)
 
@@ -157,6 +123,7 @@ def metric_max_over_ground_truths(metric_fn, prediction, ground_truths):
     
     return max(scores_for_ground_truths)
 
+
 def qa_metrics(gold_answers, predictions):
     f1 = exact_match = total = 0
 
@@ -171,6 +138,7 @@ def qa_metrics(gold_answers, predictions):
     f1 = 100.0 * f1 / total
 
     return {'em': exact_match, 'f1': f1}
+
 
 def evaluate(model,
              tokenizer,
@@ -200,12 +168,14 @@ def evaluate(model,
                 
     return results['em'], results['f1'], total_loss / len(valid_loader)
 
+
 def load_weights(model, params, names):
 
     new_s = OrderedDict()
     for idx, p in enumerate(params):
         new_s[names[idx]] = p
     model.load_state_dict(new_s, strict=False)
+
 
 class SquadV2Dataset(Dataset):
     def __init__(self, tokenizer, max_length, split):
@@ -247,6 +217,7 @@ class SquadV2Dataset(Dataset):
             'decoder_attention_mask': answer_encoding['attention_mask'].squeeze()
         }            
 
+
 def function(train_X, alpha_model, args):
     
     def tn(seq):
@@ -285,9 +256,10 @@ def function(train_X, alpha_model, args):
     
     return torch.cat((train_Y_metric1, train_Y_metric2, train_Y_loss)).transpose(0,1), loss_/len(train_X)
 
+
 def get_arg_parser():
 
-    parser = argparse.ArgumentParser(description="mobo swa")
+    parser = argparse.ArgumentParser(description="BOMF")
     
     parser.add_argument('--seed', '-s', type=int, default=0)
         
@@ -297,6 +269,7 @@ def get_arg_parser():
     parser.add_argument('--max_f1', type=float, required=True)
     parser.add_argument('--max_loss', type=float, required=True)
     parser.add_argument('--max_loss', type=float, required=True)
+    parser.add_argument('--niters', type=int, required=True)
     
     parser.add_argument('--key', type=str, required=True)
     parser.add_argument('--base_path', type=str, required=True)
@@ -308,8 +281,8 @@ def main():
     parser = get_arg_parser()
     args = parser.parse_args()
     
-    set_seed(args.seed)
-    configure_cudnn(False)
+    utils.set_seed(args.seed)
+    utils.configure_cudnn(False)
     
     model = T5ForConditionalGeneration.from_pretrained('t5-base').to(device)
     
@@ -342,7 +315,7 @@ def main():
         ckpt_list.append(t)
     
     tokenizer = T5Tokenizer.from_pretrained('t5-base')
-    sds = [remove_trash(m) for m in ckpt_list]
+    sds = [glue_utils.clean_ckpt(m) for m in ckpt_list]
     new_sds = [OrderedDict() for _ in range(len(sds))]
     for idx in range(len(sds)):
         for n, v in sds[idx].items():
@@ -364,7 +337,8 @@ def main():
             
         def forward(self, train_X):
             alph = train_X
-            params = tuple(sum(tuple(pi * alphai for pi, alphai in zip(p, alph.cpu()))) for j, p in enumerate(zip(*self.paramslist)))
+            params = tuple(sum(tuple(pi * alphai for pi, alphai in zip(p, alph.cpu())))\
+                for j, p in enumerate(zip(*self.paramslist)))
             params = tuple(p.cuda(0) for p in params)
             load_weights(self.model, params, self.names)
             em, f1, loss = evaluate(
@@ -461,7 +435,7 @@ def main():
     all_f1 = []
     all_loss = []
     best_metric = 0.0
-    for _ in tqdm(range(1, 30)):
+    for _ in tqdm(range(1, args.niters)):
 
         fit_gpytorch_mll(mll_qnehvi)
         qnehvi_sampler = SobolQMCNormalSampler(sample_shape=torch.Size([MC_SAMPLES]))
@@ -483,8 +457,6 @@ def main():
         
         if best_metric < total_metric:
             best_metric = total_metric
-            
-    print(args.key)
     
     data = {
         'em':all_em,
@@ -492,7 +464,7 @@ def main():
         'loss':all_loss
     }
     
-    with open('t5_mobo_swa_loss_vs_metric.json', 'w') as json_file:
+    with open('squad_bomf_results.json', 'w') as json_file:
         json.dump(data, json_file, indent=4)
         
 if __name__ =="__main__":

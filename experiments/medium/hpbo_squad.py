@@ -19,6 +19,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 # -----------------------------------------------------------------------------
+from src import utils, squad_utils 
+
 import time
 import datetime
 import argparse
@@ -33,19 +35,15 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.utils.data.distributed
 
-# Dataset
-from train import train_fn
 import socket
 import datasets
 from datasets import load_metric
 from dataset import Xsum_Dataset, make_dataloader
 
-# Model
 from transformers import get_linear_schedule_with_warmup
 from transformers import T5Tokenizer, T5ForConditionalGeneration
 from transformers import AdamW
 
-# Bo utils
 from botorch.acquisition import ExpectedImprovement
 from botorch.acquisition.logei import qLogExpectedImprovement
 
@@ -57,7 +55,6 @@ from gpytorch.mlls import ExactMarginalLogLikelihood
 import logging
 import warnings
 
-# Trainer
 import random
 import os
 import torch
@@ -66,70 +63,19 @@ import numpy as np
 from functools import partial
 from torch.utils.data import Dataset
 import ipdb
+
 warnings.filterwarnings(action='ignore')
 logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
-    
-def set_seed(seed):
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
 
-def seed_worker(seed):
-    worker_seed = torch.initial_seed() % 2**32
-    random.seed(worker_seed)
-    np.random.seed(worker_seed)
-    torch.manual_seed(worker_seed)
-    torch.cuda.manual_seed(worker_seed)
-    torch.cuda.manual_seed_all(worker_seed)
-
-def configure_cudnn(debug):
-    cudnn.enabled = True
-    cudnn.benchmark = True
-    if debug:
-        cudnn.deterministic = True
-        cudnn.benchmark = False
 
 def cleanup():
     dist.destroy_process_group()
 
-def get_arg_parser():
-    parser =  argparse.ArgumentParser(description=" A parser for T5 summarizer")
-    parser.add_argument("--batch_size", type=int, default=None)
-    parser.add_argument("--epoch", type=int, default=None)
     
-    parser.add_argument("--lr", type=float, default=None)
-    parser.add_argument("--metric", type=str, default=None)
-    parser.add_argument("--task", type=str, default='squad')
-    parser.add_argument("--model", type=str, default='t5-base')
-    parser.add_argument('--bo_seed', type=int, default=None)
-    parser.add_argument('--train_seed', type=int, default=None)
-    parser.add_argument('--num_workers', type=int, default=4)
-    parser.add_argument("--gpu_devices", type=int, nargs='+', default=None, help="")
-    parser.add_argument('--gpu', default=None, type=int, help='GPU id to use.')
-    parser.add_argument('--dist-url', default='tcp://localhost:32465', type=str, help='')
-    parser.add_argument('--dist-backend', default='nccl', type=str, help='')
-    parser.add_argument('--rank', default=0, type=int, help='')
-    parser.add_argument('--world_size', default=1, type=int, help='')
-    parser.add_argument('--distributed', action='store_true', help='')
-    parser.add_argument('--ckpt_path', type=str, default="./ckpt")
-    parser.add_argument('--swa_start', type=int, default=None)
-    parser.add_argument('--bo_iters', type=int, default=None)
-    parser.add_argument('--q', type=int, default=None)
-    parser.add_argument('--num_restarts', type=int, default=5)
-    parser.add_argument('--raw_samples', type=int, default=20)
-    
-    parser.add_argument('--freeze_num', type=int, default=0)
-    
-    return parser
-    
-
 def main_worker(rank, world_size, conn, args):
 
-    set_seed(args.train_seed)
-    configure_cudnn(False)
+    utils.set_seed(args.train_seed)
+    utils.configure_cudnn(False)
 
     os.makedirs(args.ckpt_path, exist_ok=True)
     
@@ -142,8 +88,6 @@ def main_worker(rank, world_size, conn, args):
     args.num_worker = int(args.num_workers / world_size)
 
     metric = load_metric(args.metric)
-        
-    # ########################### Model Settings ###########################
     model = T5ForConditionalGeneration.from_pretrained(args.model)
     
     if args.freeze_num > 0:
@@ -157,22 +101,22 @@ def main_worker(rank, world_size, conn, args):
     no_decay = ["bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
             {
-                "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+                "params": [p for n, p in model.named_parameters()\
+                    if not any(nd in n for nd in no_decay)],
                 "weight_decay": 0.1,
             },
             {
-                "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+                "params": [p for n, p in model.named_parameters()\
+                    if any(nd in n for nd in no_decay)],
                 "weight_decay": 0.0,
             },
     ]
     
     optimizer = AdamW(optimizer_grouped_parameters, 
                       lr=args.lr)
-
-    # Tokenizer
+    
     wikitokenizer = T5Tokenizer.from_pretrained(args.model, use_fast=True)
 
-    # ########################### Load Dataset ###########################
     class SquadV2Dataset(Dataset):
         def __init__(self, tokenizer, max_length, split):
             self.dataset = datasets.load_dataset('squad_v2', split=split)
@@ -220,7 +164,7 @@ def main_worker(rank, world_size, conn, args):
     train_loader = torch.utils.data.DataLoader(dataset=train_ds, 
                                                batch_size=args.batch_size, 
                                                sampler=train_sampler, 
-                                               worker_init_fn=seed_worker)
+                                               worker_init_fn=utils.seed_worker)
     valid_loader = torch.utils.data.DataLoader(dataset= valid_ds, batch_size=32)
 
     scheduler = get_linear_schedule_with_warmup(
@@ -233,28 +177,29 @@ def main_worker(rank, world_size, conn, args):
     print("The number of parameters of model is {}...".format(num_params))
         
     epoch_start = time.time()
-    best_rouge = 0.0
+    best_m = 0.0
     for ep in range(args.epoch):
-        epoch_loss, epoch_rouge = train_fn(model,
-                                        wikitokenizer,  
-                                        optimizer,
-                                        scheduler,
-                                        train_loader, 
-                                        valid_loader,
-                                        metric,
-                                        2,
-                                        rank)
+        epoch_loss, epoch_m = squad_utils.train_fn(model,
+                                                   wikitokenizer,  
+                                                   optimizer,
+                                                   scheduler,
+                                                   train_loader, 
+                                                   valid_loader,
+                                                   metric,
+                                                   2,
+                                                   rank)
                       
         elapse_time = time.time() - epoch_start
         elapse_time = datetime.timedelta(seconds=elapse_time)
         
-        if rank == 0:
-            print(f"Epoch: {ep+1} | train loss: {epoch_loss:.4f} | valid metrics: {epoch_rouge:.4f}% | time: {elapse_time}")
+        if rank == 0:   
+            print(f"Epoch: {ep+1} | train loss: {epoch_loss:.4f} | "
+                  f"valid metrics: {epoch_rouge:.4f}% | time: {elapse_time}")
 
-        if epoch_rouge > best_rouge:
-            best_rouge = epoch_rouge
+        if epoch_m > best_m:
+            best_m = epoch_m
  
-    conn.send(best_rouge)
+    conn.send(best_m)
     
     del model
     del optimizer
@@ -262,11 +207,13 @@ def main_worker(rank, world_size, conn, args):
     
     cleanup()
 
+
 def find_free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(('', 0)) 
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         return s.getsockname()[1]  
+    
     
 def train(learning_rate,
           batch_size,
@@ -290,14 +237,16 @@ def train(learning_rate,
     gc.collect()
     torch.cuda.empty_cache()
     best_metric = best_metric[0]
-    set_seed(args.bo_seed)
+    utils.set_seed(args.bo_seed)
     return torch.tensor(best_metric, dtype=torch.float32)
+
 
 def generate_initial_points(bounds, n_points=3):
     lower_bounds, upper_bounds = bounds[0], bounds[1]
     scale = upper_bounds - lower_bounds
     points = lower_bounds + torch.rand((n_points, bounds.size(1))) * scale
     return points  
+
 
 def optimize_hyperparameters(bounds, evaluate_model, config):
     
@@ -330,21 +279,61 @@ def optimize_hyperparameters(bounds, evaluate_model, config):
         print(f'>>>>>> Selected learning rate: {train_x[-1][0]}')
         print(f'>>>>>> Selected batch size   : {int(train_x[-1][1])}')
         print(f'>>>>>> Validation Metric     : {train_y[-1]}')
-        print(f'=====================================================')
+        print('='*30)
 
     return train_x, train_y
+
+
+def get_arg_parser():
+    parser =  argparse.ArgumentParser(description="HPBO")
+    
+    parser.add_argument("--batch_size", type=int, default=None)
+    parser.add_argument("--epoch", type=int, default=None)
+    parser.add_argument("--lr", type=float, default=None)
+    parser.add_argument("--metric", type=str, default=None)
+    parser.add_argument("--model", type=str, default='t5-base')
+    
+    parser.add_argument('--bo_seed', type=int, default=None)
+    parser.add_argument('--train_seed', type=int, default=None)
+    parser.add_argument('--num_workers', type=int, default=4)
+    parser.add_argument("--gpu_devices", type=int, nargs='+', default=None, help="")
+    parser.add_argument('--gpu', default=None, type=int, help='GPU id to use.')
+    parser.add_argument('--dist-url', default='tcp://localhost:32465', type=str, help='')
+    parser.add_argument('--dist-backend', default='nccl', type=str, help='')
+    parser.add_argument('--rank', default=0, type=int, help='')
+    parser.add_argument('--world_size', default=1, type=int, help='')
+    parser.add_argument('--distributed', action='store_true', help='')
+    
+    parser.add_argument('--ckpt_path', type=str, default="./ckpt")
+    parser.add_argument('--swa_start', type=int, default=None)
+    parser.add_argument('--bo_iters', type=int, default=None)
+    parser.add_argument('--q', type=int, default=None)
+    parser.add_argument('--num_restarts', type=int, default=5)
+    parser.add_argument('--raw_samples', type=int, default=20)
+
+    parser.add_argument('--lr_lower_bound', type=float, default=1e-07)
+    parser.add_argument('--lr_upper_bound', type=float, default=1e-03)
+    parser.add_argument('--bs_lower_bound', type=int, default=8)
+    parser.add_argument('--bs_upper_bound', type=int, default=16)
+    
+    parser.add_argument('--freeze_num', type=int, default=0)
+    
+    return parser
+
 
 def main():
     
     parser = get_arg_parser()
     args = parser.parse_args()
     
-    set_seed(args.bo_seed)
+    utils.set_seed(args.bo_seed)
     
-    bounds = torch.tensor([[1e-6, 32], [1e-04, 64]], dtype=torch.float32) 
+    bounds = torch.tensor([[args.lr_lower_bound, args.bs_lower_bound],
+                           [args.lr_upper_bound, args.bs_upper_bound]],
+                          dtype=torch.float32) 
     evaluate_model = partial(train, args=args)
     
-    print(f"Starting outer BO with {args.task} task...")
+    print(f"Starting HPBO with SQuAD...")
     start_time = time.time()
     optimized_params = optimize_hyperparameters(bounds, evaluate_model, args)
     elapse_time = time.time() - start_time
@@ -363,9 +352,9 @@ def main():
         'batch_size':hps[:,1].tolist(),
         'metric':results.tolist()
     }
-    with open(f'./logs/freeze_{args.freeze_num}_xsum_outer_bo.json', 'w') as file:
+    with open(f'./logs/freeze_{args.freeze_num}_squad_outer_bo.json', 'w') as file:
         json.dump(log_data, file)
 
-    
+
 if __name__ =="__main__":
     main()

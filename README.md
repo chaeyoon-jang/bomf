@@ -32,18 +32,12 @@ Run the following commands for different experimental steps:
    bash hpbo_{data_type}.sh
    ```
 
-2. **Checkpoint Training**  
-   Save checkpoints along the best trajectory:  
-   ```bash
-   bash train_{data_type}.sh
-   ```
-
-3. **Model Fusion**  
+2. **Model Fusion**  
    Discover the best combination of checkpoints:  
    ```bash
    bash bomf_{data_type}.sh
    ```
-
+   
 Replace the placeholders as follows:  
 - `data_type`: `squad`, `glue`, `samsum`, etc.
 

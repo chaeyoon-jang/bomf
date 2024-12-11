@@ -31,6 +31,7 @@ from functools import partial
 from collections import OrderedDict
 
 import torch
+from easydict import EasyDict
 from botorch.models import SingleTaskGP
 from botorch.models.model_list_gp_regression import ModelListGP
 from botorch.models.transforms.outcome import Standardize
@@ -98,7 +99,7 @@ def make_env(task, seed):
     config['freeze_num']  = 0
     
     config = EasyDict(config)
-    model = RobertaGLUE(config)
+    model = glue_utils.RobertaGLUE(config)
     
     ckpt_list = []
     path = args.base_path
@@ -138,6 +139,7 @@ def get_arg_parser():
     parser.add_argument('--min_m1', type=float, required=True)
     parser.add_argument('--max_m2', type=float, required=True)
     parser.add_argument('--min_m2', type=float, required=True)
+    parser.add_argument('--n_iters', type=int, default=50, required=True)
     
     parser.add_argument('--key', type=str, required=True)
     parser.add_argument('--base_path', type=str, required=True)
@@ -155,7 +157,7 @@ def main():
     
     tkwargs = { 
                "dtype": torch.double,
-               "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+               "device": torch.device("cuda" if torch.cuda.is_available() else "cpu")
     }
     
     SMOKE_TEST = os.environ.get("SMOKE_TEST")
@@ -163,7 +165,7 @@ def main():
     struct, ckpt_list, valid_loader, metric = make_env(args.task, args)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    sds = [remove_trash(m, 0) for m in ckpt_list]
+    sds = [glue_utils.clean_ckpt(m, 0) for m in ckpt_list]
 
     new_sds = [OrderedDict() for _ in range(len(sds))]
     for idx in range(len(sds)):
@@ -248,9 +250,8 @@ def main():
         new_obj = new_obj.to(**tkwargs)
         return new_x, new_obj
 
-    niter = len(ckpt_list)*5 
     best_metric = 0.0 
-    for _ in tqdm(range(1, niter)):
+    for _ in tqdm(range(1, args.niter)):
 
         fit_gpytorch_mll(mll_qnehvi)
         qnehvi_sampler = SobolQMCNormalSampler(sample_shape=torch.Size([MC_SAMPLES]))
@@ -272,9 +273,10 @@ def main():
         cur_metric = train_obj[:,0].max()*(args.max_m1 - args.min_m1) + args.min_m1
         if best_metric < cur_metric:
             best_metric = cur_metric
-            print(best_metric)
+            print(f"Current Best Metric: {best_metric:.4f}")
         
-    print(best_metric)
+    print('='*30)
+    print(f"Final Best Metric: {best_metric:.4f}") 
 
 
 if __name__ == '__main__':

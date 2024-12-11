@@ -18,51 +18,6 @@ from transformers import logging
 from torch.backends import cudnn
 
 logging.set_verbosity_error()
-
-task_text_field_map = {
-            'cola': ['sentence'],
-            'sst2': ['sentence'],
-            'mrpc': ['sentence1', 'sentence2'],
-            'qqp': ['question1', 'question2'],
-            'stsb': ['sentence1', 'sentence2'],
-            'mnli': ['premise', 'hypothesis'],
-            'qnli': ['question', 'sentence'],
-            'rte': ['sentence1', 'sentence2'],
-            'wnli': ['sentence1', 'sentence2'],
-            'ax': ['premise', 'hypothesis']
-        }
-
-glue_task_num_labels = {
-            'cola': 2,
-            'sst2': 2,
-            'mrpc': 2,
-            'qqp': 2,
-            'stsb': 1,
-            'mnli': 3,
-            'qnli': 2,
-            'rte': 2,
-            'wnli': 2,
-            'ax': 3
-        }
-
-loader_columns = [
-            'input_ids',
-            'label',
-            'attention_mask'
-        ]
-
-task_dict = {
-    'rte' : (2, 16),
-    'cola' : (2, 16),
-    'mrpc' : (2, 16),
-    'stsb' : (1, 16),
-    'wnli': (2, 16),
-    'sst2' : (2, 32),
-    'mnli' : (3, 32),
-    'qnli' : (2, 32),
-    'qqp' : (2, 32)
-}
-
 tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
 
 def seed_worker(seed):

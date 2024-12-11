@@ -127,4 +127,21 @@ class RobertaGLUE(torch.nn.Module):
         logits = self.dropout(logits)  
         logits = self.out(logits)
 
-        return logits
+        return logits 
+    
+
+def clean_ckpt(state_dict, type=0, name='model_state_dict'):
+    new_state_dict = OrderedDict()
+    for k, v in state_dict[name].items():
+        if (k == 'n_averaged'):
+            continue
+        if 'module' in k:
+            if type == 0:
+                name = k[7:]
+            else:
+                name = k[14:]
+            new_state_dict[name] = v
+        else:
+            name = k
+            new_state_dict[name] = v
+    return new_state_dict

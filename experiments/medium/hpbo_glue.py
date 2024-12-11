@@ -107,10 +107,9 @@ def train_iter(
     ):
 
     best_metric, step = 0.0, 0
-    from tqdm import tqdm
     for epoch in range(n_epochs):
         model.train()
-        for data in tqdm(train_loader):
+        for data in train_loader:
             
             if step == 0:
                 start_time = time.time()
@@ -182,8 +181,6 @@ def main_worker(
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
     criterion = torch.nn.CrossEntropyLoss()
     metric = glue_utils.metrics(config.task)
-    
-    print('dist')
     
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_data,\
         num_replicas=world_size, rank=rank)
@@ -315,7 +312,7 @@ def optimize_hyperparameters(bounds, evaluate_model, config):
         print(f'>>>>>> Selected learning rate: {train_x[-1][0]}')
         print(f'>>>>>> Selected batch size   : {int(train_x[-1][1])}')
         print(f'>>>>>> Validation Metric     : {train_y[-1]}')
-        print(f'=====================================================')
+        print('='*30)
 
     return train_x, train_y
 
@@ -373,7 +370,7 @@ def main():
                           dtype=torch.float32) 
     
     print("Loading datasets...")
-    tokenizer = RobertaTokenizer.from_pretrained(args.model_type, clean_up_tokenization_spaces=True)
+    tokenizer = RobertaTokenizer.from_pretrained(args.model_type)
     train_data, valid_data = glue_utils.make_glue_data(args.task, tokenizer)
     evaluate_model = partial(train,
                              config=args,

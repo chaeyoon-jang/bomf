@@ -3,10 +3,8 @@
 # Shell script to run HPBO experiments for GLUE tasks
 # !! Customizable parameters for large and small tasks !!
 
-# Define the experiment mode
 EXPERIMENT="python -m experiments.medium.hpbo_glue"
 
-# Arguments for large GLUE tasks
 if [ "$1" == "large" ]; then
     TASKS=("mnli" "qqp" "qnli" "sst2")
     BS_LOWER=32
@@ -15,7 +13,6 @@ if [ "$1" == "large" ]; then
     LR_UPPER=5e-4
     NUM_GPUS=4
 else
-    # Arguments for small GLUE tasks
     TASKS=("rte" "mrpc")
     BS_LOWER=4
     BS_UPPER=32
@@ -24,7 +21,6 @@ else
     NUM_GPUS=2
 fi
 
-# Run experiments for each task
 for TASK in "${TASKS[@]}"; do
     echo "Running experiment for task: $TASK"
     $EXPERIMENT \
