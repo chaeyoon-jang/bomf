@@ -16,7 +16,7 @@ MIN_M2=$6
 N_ITERS=$7
 BASE_PATH=$8
 
-EXPERIMENT_SCRIPT="python -m experiments.medium.bomf_glue"
+EXPERIMENT_SCRIPT="python -m experiments.bomf_glue"
 
 echo "Running experiment for task: $TASK"
 $EXPERIMENT_SCRIPT \

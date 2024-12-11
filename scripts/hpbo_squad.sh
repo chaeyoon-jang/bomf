@@ -20,7 +20,7 @@ done
 
 BOUNDS_JSON="[[${LR_LOWER_BOUND}, ${BS_LOWER_BOUND}], [${LR_UPPER_BOUND}, ${BS_UPPER_BOUND}]]"
 
-python -m experiments.medium.hpbo_squad \
+python -m experiments.hpbo_squad \
     --bounds "$BOUNDS_JSON" \
     --freeze_num "$FREEZE_NUM" \
     --bo_seed 42 \

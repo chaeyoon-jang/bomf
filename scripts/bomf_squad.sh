@@ -16,7 +16,7 @@ MAX_F1=$6
 N_ITERS=$7
 BASE_PATH=$8
 
-EXPERIMENT_SCRIPT="python -m experiments.medium.bomf_squad"
+EXPERIMENT_SCRIPT="python -m experiments.bomf_squad"
 
 echo "Running experiment for task: $TASK with seed: $SEED"
 

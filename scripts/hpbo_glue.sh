@@ -3,7 +3,7 @@
 # Shell script to run HPBO experiments for GLUE tasks
 # !! Customizable parameters for large and small tasks !!
 
-EXPERIMENT="python -m experiments.medium.hpbo_glue"
+EXPERIMENT="python -m experiments.hpbo_glue"
 
 if [ "$1" == "large" ]; then
     TASKS=("mnli" "qqp" "qnli" "sst2")
